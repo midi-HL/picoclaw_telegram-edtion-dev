@@ -1,0 +1,236 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+version: 2
+
+project_name: picoclaw-edition
+
+git:
+  ignore_tags:
+    - nightly
+    - ".*-nightly.*"
+
+before:
+  hooks:
+    - go generate ./...
+    - sh -c 'cd web/frontend && CI=true pnpm install --frozen-lockfile && pnpm build:backend'
+    - sh -c 'GOBIN="$(go env GOPATH)/bin"; mkdir -p "$GOBIN"; go install github.com/tc-hib/go-winres@v0.3.3 && "$GOBIN/go-winres" make --in web/backend/winres/winres.json --out web/backend/rsrc --product-version={{ .Version }} --file-version={{ .Version }}'
+
+builds:
+  - id: picoclaw
+    binary: picoclaw
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - goolm
+      - stdjson
+    ldflags:
+      - -s -w
+      - -X github.com/sipeed/picoclaw/pkg/config.Version={{ .Version }}
+      - -X github.com/sipeed/picoclaw/pkg/config.GitCommit={{ .ShortCommit }}
+      - -X github.com/sipeed/picoclaw/pkg/config.BuildTime={{ .Date }}
+      - -X github.com/sipeed/picoclaw/pkg/config.GoVersion={{ with index .Env "GOVERSION" }}{{ . }}{{ else }}unknown{{ end }}
+    goos:
+      - linux
+      - windows
+      - darwin
+      - freebsd
+      - netbsd
+    goarch:
+      - amd64
+      - arm64
+      - 386
+      - arm
+      - riscv64
+      - loong64
+      - s390x
+      - mipsle
+      - mips
+    main: ./cmd/picoclaw
+    ignore:
+      # 32-bit MIPS uses softfloat, no goolm
+      - goos: linux
+        goarch: mipsle
+      - goos: linux
+        goarch: mips
+      # darwin has no 32-bit
+      - goos: darwin
+        goarch: 386
+      - goos: darwin
+        goarch: arm
+      # FreeBSD/NetBSD limited arch support
+      - goos: freebsd
+        goarch: 386
+      - goos: freebsd
+        goarch: arm
+      - goos: freebsd
+        goarch: mipsle
+      - goos: freebsd
+        goarch: mips
+      - goos: netbsd
+        goarch: 386
+      - goos: netbsd
+        goarch: arm
+      - goos: netbsd
+        goarch: s390x
+      - goos: netbsd
+        goarch: mipsle
+      - goos: netbsd
+        goarch: mips
+
+  # 32-bit MIPS builds require special flags (softfloat, no goolm)
+  - id: picoclaw-mips
+    binary: picoclaw
+    env:
+      - CGO_ENABLED=0
+      - GOMIPS=softfloat
+    tags:
+      - stdjson
+    ldflags:
+      - -s -w
+      - -X github.com/sipeed/picoclaw/pkg/config.Version={{ .Version }}
+      - -X github.com/sipeed/picoclaw/pkg/config.GitCommit={{ .ShortCommit }}
+      - -X github.com/sipeed/picoclaw/pkg/config.BuildTime={{ .Date }}
+      - -X github.com/sipeed/picoclaw/pkg/config.GoVersion={{ with index .Env "GOVERSION" }}{{ . }}{{ else }}unknown{{ end }}
+    goos:
+      - linux
+    goarch:
+      - mipsle
+      - mips
+    main: ./cmd/picoclaw
+
+  - id: picoclaw-launcher
+    binary: picoclaw-launcher
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - goolm
+      - stdjson
+    ldflags:
+      - -s -w
+      - -X github.com/sipeed/picoclaw/pkg/config.Version={{ .Version }}
+      - -X github.com/sipeed/picoclaw/pkg/config.GitCommit={{ .ShortCommit }}
+      - -X github.com/sipeed/picoclaw/pkg/config.BuildTime={{ .Date }}
+      - -X github.com/sipeed/picoclaw/pkg/config.GoVersion={{ with index .Env "GOVERSION" }}{{ . }}{{ else }}unknown{{ end }}
+    goos:
+      - linux
+      - windows
+      - darwin
+      - freebsd
+      - netbsd
+    goarch:
+      - amd64
+      - arm64
+      - 386
+      - arm
+      - riscv64
+      - loong64
+      - s390x
+      - mipsle
+      - mips
+    main: ./web/backend
+    ignore:
+      - goos: linux
+        goarch: mipsle
+      - goos: linux
+        goarch: mips
+      - goos: darwin
+        goarch: 386
+      - goos: darwin
+        goarch: arm
+      - goos: freebsd
+        goarch: 386
+      - goos: freebsd
+        goarch: arm
+      - goos: freebsd
+        goarch: mipsle
+      - goos: freebsd
+        goarch: mips
+      - goos: netbsd
+        goarch: 386
+      - goos: netbsd
+        goarch: arm
+      - goos: netbsd
+        goarch: s390x
+      - goos: netbsd
+        goarch: mipsle
+      - goos: netbsd
+        goarch: mips
+
+  - id: picoclaw-launcher-mips
+    binary: picoclaw-launcher
+    env:
+      - CGO_ENABLED=0
+      - GOMIPS=softfloat
+    tags:
+      - stdjson
+    ldflags:
+      - -s -w
+      - -X github.com/sipeed/picoclaw/pkg/config.Version={{ .Version }}
+      - -X github.com/sipeed/picoclaw/pkg/config.GitCommit={{ .ShortCommit }}
+      - -X github.com/sipeed/picoclaw/pkg/config.BuildTime={{ .Date }}
+      - -X github.com/sipeed/picoclaw/pkg/config.GoVersion={{ with index .Env "GOVERSION" }}{{ . }}{{ else }}unknown{{ end }}
+    goos:
+      - linux
+    goarch:
+      - mipsle
+      - mips
+    main: ./web/backend
+
+archives:
+  - formats: [tar.gz]
+    # Archive naming: picoclaw-edition-{os}-{arch}
+    name_template: >-
+      {{ .ProjectName }}-
+      {{- .Os }}-
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else if eq .Arch "arm" }}armv{{ .Arm }}
+      {{- else }}{{ .Arch }}{{ end }}
+    # use zip for windows archives
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+nfpms:
+  - id: picoclaw
+    ids:
+      - picoclaw
+      - picoclaw-launcher
+      - picoclaw-mips
+      - picoclaw-launcher-mips
+    package_name: picoclaw-edition
+    file_name_template: >-
+      {{ .PackageName }}-
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "arm64" }}aarch64
+      {{- else if eq .Arch "arm" }}armv{{ .Arm }}
+      {{- else }}{{ .Arch }}{{ end }}
+    vendor: picoclaw-edition
+    homepage: https://github.com/midi-HL/picoclaw-edition
+    maintainer: picoclaw-edition contributors
+    description: picoclaw-edition - PicoClaw fork with 32-bit support and multimodal enhancements
+    license: MIT
+    formats:
+      - rpm
+      - deb
+    bindir: /usr/bin
+    contents:
+      - src: web/picoclaw-launcher.desktop
+        dst: /usr/share/applications/picoclaw-launcher.desktop
+      - src: web/picoclaw-launcher.png
+        dst: /usr/share/icons/hicolor/512x512/apps/picoclaw-launcher.png
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  disable: '{{ isEnvSet "NIGHTLY_BUILD" }}'
+  footer: >-
+
+    ---
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).

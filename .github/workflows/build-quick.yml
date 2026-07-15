@@ -1,0 +1,84 @@
+name: build-quick
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64
+            ext: .exe
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+            ext: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: web/frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: web/frontend
+        run: pnpm build:backend
+
+      - name: Build core binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+          GIT_COMMIT=$(git rev-parse --short=8 HEAD 2>/dev/null || echo "dev")
+          BUILD_TIME=$(date +%FT%T%z)
+          GO_VERSION=$(go env GOVERSION)
+          CONFIG_PKG=github.com/sipeed/picoclaw/pkg/config
+          LDFLAGS="-X ${CONFIG_PKG}.Version=${VERSION} -X ${CONFIG_PKG}.GitCommit=${GIT_COMMIT} -X ${CONFIG_PKG}.BuildTime=${BUILD_TIME} -X ${CONFIG_PKG}.GoVersion=${GO_VERSION} -s -w"
+          mkdir -p build
+          go build -v -tags "goolm,stdjson" -ldflags "${LDFLAGS}" -o build/picoclaw-${{ matrix.suffix }}${{ matrix.ext }} ./cmd/picoclaw
+
+      - name: Build launcher binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+          GIT_COMMIT=$(git rev-parse --short=8 HEAD 2>/dev/null || echo "dev")
+          BUILD_TIME=$(date +%FT%T%z)
+          GO_VERSION=$(go env GOVERSION)
+          CONFIG_PKG=github.com/sipeed/picoclaw/pkg/config
+          LDFLAGS="-X ${CONFIG_PKG}.Version=${VERSION} -X ${CONFIG_PKG}.GitCommit=${GIT_COMMIT} -X ${CONFIG_PKG}.BuildTime=${BUILD_TIME} -X ${CONFIG_PKG}.GoVersion=${GO_VERSION} -s -w"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            LDFLAGS="-H=windowsgui ${LDFLAGS}"
+          fi
+          go build -v -tags "goolm,stdjson" -ldflags "${LDFLAGS}" -o build/picoclaw-launcher-${{ matrix.suffix }}${{ matrix.ext }} ./web/backend
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: picoclaw-${{ matrix.suffix }}
+          path: build/picoclaw-*${{ matrix.suffix }}*
