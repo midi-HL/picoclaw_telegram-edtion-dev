@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useTranslation } from "react-i18next"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -44,7 +43,6 @@ async function safeFetchJson<T>(
 }
 
 export function TelegramStickersManager() {
-  const { t } = useTranslation()
   const [stickers, setStickers] = useState<StickerItem[]>([])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [mode, setMode] = useState<"manual" | "import">("manual")
@@ -137,7 +135,7 @@ export function TelegramStickersManager() {
       packName = packName.split("addstickers/")[1]
     }
 
-    const { data, error } = await safeFetchJson<any>(
+    const { error } = await safeFetchJson<any>(
       "/api/telegram/stickers/import-set",
       {
         method: "POST",
