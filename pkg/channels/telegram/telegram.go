@@ -367,26 +367,42 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]
 
 // appendStickerPrompt loads the shared sticker store and appends the available
 // sticker list to the content so the LLM knows which stickers it can send.
+// The prompt is ALWAYS injected (even when the list is empty) so the LLM
+// understands the sticker mechanism. When the list is empty, the LLM simply
+// has no stickers to choose from and will not attempt to send any.
 func (c *TelegramChannel) appendStickerPrompt(content string) string {
+	var b strings.Builder
+	b.WriteString("\n\n[系统功能：Telegram 自定义贴纸/表情包]\n")
+	b.WriteString("你可以使用 Telegram 自定义贴纸/表情包来让回答更生动。")
+	b.WriteString("如果你认为在当前对话语境下发送某个表情包非常合适，请在回复文本末尾输出：[SEND_STICKER: <StickerID>]。\n")
+	b.WriteString("规则：\n")
+	b.WriteString("1. 每次回复最多 1 张表情包。\n")
+	b.WriteString("2. 只在确实契合、幽默或需要强烈表达情绪时使用，不要滥用。\n")
+	b.WriteString("3. 只能使用下方列表中的 StickerID，没有可用表情时不要发送。\n")
+	b.WriteString("4. 此标记会被系统拦截截断，不会展示给用户，必须配合文字一同输出。\n\n")
+
 	store, err := sticker.NewStickerStore()
 	if err != nil {
-		return content
+		logger.WarnCF("telegram", "Failed to open sticker store for prompt injection", map[string]any{
+			"error": err.Error(),
+		})
+		b.WriteString("当前无可用表情包（存储初始化失败）。\n")
+		return content + b.String()
 	}
 	items, err := store.GetAll()
-	if err != nil || len(items) == 0 {
-		return content
+	if err != nil {
+		logger.WarnCF("telegram", "Failed to read stickers for prompt injection", map[string]any{
+			"error": err.Error(),
+		})
+		b.WriteString("当前无可用表情包（读取失败）。\n")
+		return content + b.String()
+	}
+	if len(items) == 0 {
+		b.WriteString("当前无可用表情包。请先通过 Web 管理后台（渠道 → Telegram → 表情包管理）导入表情包。\n")
+		return content + b.String()
 	}
 
-	var b strings.Builder
-	b.WriteString("\n\n你现在可以使用以下 Telegram 自定义贴纸/表情包来让你的回答更加生动有趣。\n")
-	b.WriteString("如果你认为在当前的对话语境下发送某个表情包非常合适，请直接在你的回复文本末尾或合适位置显式输出占位符标记：[SEND_STICKER: <StickerID>]。\n")
-	b.WriteString("注意：\n")
-	b.WriteString("1. 每次回复最多只能发送 1 张表情包。\n")
-	b.WriteString("2. 只有在确实非常契合、幽默或者需要强烈表达情绪时才使用，不要频繁滥用。\n")
-	b.WriteString("3. 绝对不要使用任何不在下方列表中的 StickerID。\n")
-	b.WriteString("4. 严禁只用该标记回复，它必须配合你的文本对话一同输出，此标记会被系统拦截截断，不会展示给用户。\n\n")
 	b.WriteString("当前可用表情包列表：\n")
-
 	for _, item := range items {
 		desc := item.Description
 		if desc == "" {
@@ -395,6 +411,10 @@ func (c *TelegramChannel) appendStickerPrompt(content string) string {
 		fmt.Fprintf(&b, "- StickerID: %q | 适用场景: %q | 关联表情: %q | 画面描述: %q\n",
 			item.ID, item.UsageScenarios, item.EmojiHint, desc)
 	}
+
+	logger.DebugCF("telegram", "Injected sticker prompt", map[string]any{
+		"sticker_count": len(items),
+	})
 
 	return content + b.String()
 }
@@ -1427,6 +1447,14 @@ func (c *TelegramChannel) collectTelegramMessageParts(
 	}
 	if msg.Sticker != nil {
 		sticker := msg.Sticker
+		logger.DebugCF("telegram", "Received sticker message", map[string]any{
+			"file_id":     sticker.FileID,
+			"emoji":       sticker.Emoji,
+			"is_animated": sticker.IsAnimated,
+			"is_video":    sticker.IsVideo,
+			"has_thumb":   sticker.Thumbnail != nil,
+		})
+
 		var targetFileID string
 		var ext string
 
@@ -1451,6 +1479,17 @@ func (c *TelegramChannel) collectTelegramMessageParts(
 			}
 			parts.content = append(parts.content, fmt.Sprintf("[用户向你发送了一张自定义贴纸%s]", emojiHint))
 			parts.content = append(parts.content, "[系统提示：用户向你发送了一张自定义表情包/贴纸，其图片已附带在多模态输入中。请结合图片画面内容、场景氛围以及用户的聊天上下文，精准理解此表情包所表达的情感、动作与梗，并在后续回应中做出符合你人设、自然且富有表现力的互动。]")
+
+			logger.InfoCF("telegram", "Sticker captured for multimodal processing", map[string]any{
+				"file_id":    sticker.FileID,
+				"emoji":      sticker.Emoji,
+				"local_path": localPath,
+				"media_ref":  mediaRef,
+			})
+		} else {
+			logger.WarnCF("telegram", "Failed to download sticker", map[string]any{
+				"target_file_id": targetFileID,
+			})
 		}
 	}
 	return parts
